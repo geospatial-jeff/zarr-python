@@ -431,7 +431,7 @@ class GroupMetadata(Metadata):
         if self.consolidated_metadata:
             result["consolidated_metadata"] = self.consolidated_metadata.to_dict()
 
-        for (name, extension) in self.extensions.items():
+        for (name, extension) in result.pop('extensions').items():
             result[name] = extension
 
         return result
