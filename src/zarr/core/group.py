@@ -48,6 +48,7 @@ from zarr.core.common import (
     parse_shapelike,
 )
 from zarr.core.config import config
+from zarr.core.extensions import validate_extension
 from zarr.core.metadata import ArrayV2Metadata, ArrayV3Metadata
 from zarr.core.sync import SyncMixin, sync
 from zarr.errors import ContainsArrayError, ContainsGroupError, MetadataValidationError
@@ -329,6 +330,11 @@ class GroupMetadata(Metadata):
     zarr_format: ZarrFormat = 3
     consolidated_metadata: ConsolidatedMetadata | None = None
     node_type: Literal["group"] = field(default="group", init=False)
+    extension_schemas: list[str] = field(default_factory=list)
+
+    # A logical abstraction to hold all extensions referenced by the group.
+    # Extensions are physically stored under top-level keys of the group.
+    extensions: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_buffer_dict(self, prototype: BufferPrototype) -> dict[str, Buffer]:
         json_indent = config.get("json_indent")
@@ -383,6 +389,8 @@ class GroupMetadata(Metadata):
         attributes: dict[str, Any] | None = None,
         zarr_format: ZarrFormat = 3,
         consolidated_metadata: ConsolidatedMetadata | None = None,
+        extension_schemas: list[str] | None = None,
+        extensions: dict[str, dict[str, Any]] | None = None
     ) -> None:
         attributes_parsed = parse_attributes(attributes)
         zarr_format_parsed = parse_zarr_format(zarr_format)
@@ -390,6 +398,8 @@ class GroupMetadata(Metadata):
         object.__setattr__(self, "attributes", attributes_parsed)
         object.__setattr__(self, "zarr_format", zarr_format_parsed)
         object.__setattr__(self, "consolidated_metadata", consolidated_metadata)
+        object.__setattr__(self, "extension_schemas", extension_schemas)
+        object.__setattr__(self, "extensions", extensions)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GroupMetadata:
@@ -407,12 +417,23 @@ class GroupMetadata(Metadata):
             expected = {x.name for x in fields(cls)}
             data = {k: v for k, v in data.items() if k in expected}
 
-        return cls(**data)
+        # Parse extensions
+        extensions = {}
+        for schema_ref in data.get("extension_schemas", []):
+            schema_key = validate_extension(data, schema_ref)
+            extension_data = data.pop(schema_key)
+            extensions.update({schema_key: extension_data})
+
+        return cls(**data, extensions=extensions)
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(replace(self, consolidated_metadata=None))
         if self.consolidated_metadata:
             result["consolidated_metadata"] = self.consolidated_metadata.to_dict()
+
+        for (name, extension) in self.extensions.items():
+            result[name] = extension
+
         return result
 
 
